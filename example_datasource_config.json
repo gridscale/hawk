@@ -1,0 +1,25 @@
+[
+  {
+    "source": "file:///run/node-id",
+    "as_variable": "node_id"
+  },
+  {
+    "source": "file:///run/gridscale/hc.json",
+    "as": "hybridcore",
+    "sub_key": "hybridcore"
+  },
+  {
+    "source": "file:///run/gridscale/hc.json",
+    "as": "node",
+    "sub_key": "hybridcore.nodes[${node_id}]"
+  },
+  {
+    "source": "file:///run/gridscale/boot.json",
+    "as": "boot"
+  },
+  {
+    "source": "https://api.example.com/v1/clusters/${node_id}",
+    "as": "cluster",
+    "sub_key": "cluster"
+  }
+]

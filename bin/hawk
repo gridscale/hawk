@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+import sys
+
+sys.dont_write_bytecode = True
+
+import importlib
+import pathlib
+import os
+import json
+if os.getenv('PLUGIN_DIR'):
+    sys.path.append(str(pathlib.Path(os.getenv('PLUGIN_DIR')).resolve()))
+sys.path.append(str(pathlib.Path(__file__).parent.resolve())+ '/lib/gs-hawk') # development and bundled path
+sys.path.append(str(pathlib.Path(__file__).parent.parent.resolve())+ '/src') # development path
+sys.path.append(str(pathlib.Path(__file__).parent.parent.resolve())+ '/lib/gs-hawk') # development and bundled path
+sys.path.append(str(pathlib.Path(os.getenv('SCIE', __file__)).parent.parent.resolve())+ '/lib/gs-hawk') # PEX path
+sys.path.append('/usr/local/lib/gs-hawk') # plugin path
+sys.path.append('/usr/lib/gs-hawk') # packaged plugin path
+importlib.invalidate_caches()
+
+import gshawk.vars
+import gshawk.args
+
+args = gshawk.vars.parser.parse_args()
+for arg in vars(args):
+    gshawk.vars.global_args[arg]= getattr(args, arg)
+
+from gshawk.util import dumpMetrics, execution_time
+from gshawk.systemd import collect_magic_units, reap_magic_units, run_unit_tasks
+from gshawk.filters import register_filters
+from gshawk.core import rollout, render_template
+
+from gshawk.secrets import Managed
+with execution_time.labels('secret_init').time():
+    managed = Managed()
+
+gshawk.vars.template_vars["hawk"]["secrets"] = managed
+
+import gshawk.helpers
+register_filters()
+
+if gshawk.vars.global_args.get('show_datasources', False):
+    print(json.dumps(gshawk.vars.template_vars, indent=2, default=str))
+    import sys
+    sys.exit(0)
+
+if gshawk.vars.global_args.get('show_log_context', False):
+    print(json.dumps(gshawk.vars.log_context, indent=2, default=str))
+    import sys
+    sys.exit(0)
+
+
+if gshawk.vars.global_args['expression'] != '':
+    print(render_template(gshawk.vars.global_args['expression'], 'expression string'), end='')
+    dumpMetrics()
+    exit(0)
+
+collect_magic_units()
+
+if not rollout():
+    print("There were failures. Not executing systemd actions", file=sys.stderr)
+    dumpMetrics()
+    exit(1)
+
+reap_magic_units()
+
+print("Handling systemd units...", file=sys.stderr)
+
+run_unit_tasks()
+dumpMetrics()
+import gshawk.db
+gshawk.db.DB.cleanup_files_and_state()

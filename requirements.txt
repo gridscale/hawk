@@ -1,0 +1,7 @@
+netaddr == 1.*
+jinja2 == 3.*
+pyroute2 ==0.9.*
+nslookup == 1.*
+cryptography >= 42
+pyyaml == 6.*
+prometheus_client

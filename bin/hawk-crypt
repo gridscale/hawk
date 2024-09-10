@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+
+import sys
+sys.dont_write_bytecode = True
+import os
+import pathlib
+import importlib
+import yaml
+import json
+if os.getenv('PLUGIN_DIR'):
+    sys.path.append(str(pathlib.Path(os.getenv('PLUGIN_DIR')).resolve()))
+sys.path.append(str(pathlib.Path(__file__).parent.resolve())+ '/lib/gs-hawk') # development and bundled path
+sys.path.append(str(pathlib.Path(__file__).parent.parent.resolve())+ '/src') # development path
+sys.path.append(str(pathlib.Path(__file__).parent.parent.resolve())+ '/lib/gs-hawk') # development and bundled path
+sys.path.append(str(pathlib.Path(os.getenv('SCIE', __file__)).parent.parent.resolve())+ '/lib/gs-hawk') # PEX path
+sys.path.append('/usr/local/lib/gs-hawk') # plugin path
+sys.path.append('/usr/lib/gs-hawk') # packaged plugin path
+importlib.invalidate_caches()
+
+import gshawk.vars
+
+gshawk.vars.parser.add_argument('--one-password', type=bool, action='store', default=True, required=False, help="Use 1Password CLI (op) to access hawk-crypt keys")
+gshawk.vars.parser.add_argument('--reverse', type=bool, action='store', default=False, required=False, help="Decrypt input to output where possible")
+gshawk.vars.parser.add_argument('--derive', type=str, action='store', default='', required=False, help="if set, print the derived key for the specified hierarchy to stdout")
+args = gshawk.vars.parser.parse_args()
+for arg in vars(args):
+    gshawk.vars.global_args[arg]= getattr(args, arg)
+gshawk.vars.global_args['target'] = '/mock'
+gshawk.vars.global_args['hawk-crypt'] = True
+from gshawk.secrets import KeyManager, subtree, OnePassword, UnencryptedContent
+
+km = KeyManager()
+
+if args.one_password:
+    print("using 1Password CLI to grab keys...", file=sys.stderr)
+    try:
+        op = OnePassword()
+        op.populateKeyManager(km)
+    except Exception as e:
+        print("1Password: Failed to load secrets", e, file=sys.stderr)
+
+if args.derive:
+    print(km.pathKey(args.derive).hex())
+    exit(0)
+
+input = {}
+output = {}
+
+input = yaml.safe_load(sys.stdin)
+
+def decryptHierarchy(values, tree='.'):
+    dec = {}
+    tree = subtree.escape(tree)
+    if type(values) is dict:
+        for key in values:
+            dec[key] = decryptHierarchy(values[key], tree=tree + '.' + key)
+    else:
+        try:
+            dec = json.loads(km.decrypt(tree, values))
+        except UnencryptedContent:
+            dec = values
+    return dec
+
+def encryptHierarchy(values, tree='.'):
+    enc = {}
+    tree = subtree.escape(tree).strip('.')
+    if type(values) is dict:
+        for key in values:
+            vkey = key
+            if '.' in key:
+                print("Warn: '%s' contained period. Replaced with underscore" % key, file=sys.stderr)
+                key = key.replace('.', '_')
+            skey = subtree.escape(key).strip('.')
+            enc[skey] = encryptHierarchy(values[vkey], tree=subtree.escape(tree + '.' + key))
+    else:
+        enc = km.encrypt(tree, json.dumps(values))
+        try:
+            km.decrypt(tree, enc) # Test if everything is fine
+            print("successfully encrypted '%s'" % tree, file=sys.stderr)
+        except:
+            pass
+    return enc
+
+if args.reverse:
+    output = decryptHierarchy(input)
+else:
+    output = encryptHierarchy(input)
+
+sys.stdout.write(yaml.safe_dump(output))
+

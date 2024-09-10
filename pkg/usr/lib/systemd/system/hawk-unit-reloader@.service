@@ -1,0 +1,4 @@
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/bin/systemctl reset-failed %i
+ExecStart=/usr/bin/systemctl reload --no-block %i
